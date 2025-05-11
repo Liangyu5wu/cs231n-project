@@ -87,49 +87,6 @@ def plot_loss(history, save_file='loss_vs_epoch.png'):
     plt.title('Training and Validation Loss')
     plt.savefig(save_file)
 
-# particle_types = ['e+', 'e-', 'pi+', 'pi-']
-particle_types = ['e-', 'pi-']
-energy_ranges = ['E1-100', 'E30-70']
-# energy_ranges = ['E1-100']
-
-beamE_list = []
-hist2d_data_list = []
-esum_list = []
-particles_type_list = []
-data_shape = None
-
-for i, particle in enumerate(particle_types):
-    for energy_range in energy_ranges:
-        file_path = f'{particle}_{energy_range}_2000.h5'
-        group_name = f'{particle}_{energy_range}_2000'
-        beamE, hist2d_data, esum, shape = load_data(file_path, group_name)
-  
-        beamE_list.append(beamE)
-        hist2d_data_list.append(hist2d_data)
-        esum_list.append(esum)
-        
-        particles_type_list.append(np.full(beamE.shape[0], i))
-        data_shape = shape  
-
-beamE = np.concatenate(beamE_list, axis=0)
-hist2d_data = np.concatenate(hist2d_data_list, axis=0)
-esum = np.concatenate(esum_list, axis=0)
-particles_type = np.concatenate(particles_type_list, axis=0)
-
-scaler = StandardScaler()
-esum = scaler.fit_transform(esum.reshape(-1, 1)).flatten()
-
-labels_particle = tf.keras.utils.to_categorical(particles_type, num_classes=4)
-
-height, width = data_shape
-hist2d_data = hist2d_data.reshape((-1, height, width, 1))
-
-(train_beamE, train_hist2d_data, train_esum, train_labels_particle), \
-(val_beamE, val_hist2d_data, val_esum, val_labels_particle), \
-(test_beamE, test_hist2d_data, test_esum, test_labels_particle) = split_data(beamE, hist2d_data, esum, labels_particle)
-
-input_shape = (height, width, 1)
-
 def train_until_convergence(train_data, val_data, test_data, input_shape, max_rounds=1, epochs_per_round=20, patience=10):
     best_val_loss = np.inf
     round_counter = 0
@@ -165,44 +122,3 @@ def train_until_convergence(train_data, val_data, test_data, input_shape, max_ro
             break
     
     return model
-
-train_data = ([train_hist2d_data, train_esum], [train_labels_particle, train_beamE.reshape((-1, 1))])
-val_data = ([val_hist2d_data, val_esum], [val_labels_particle, val_beamE.reshape((-1, 1))])
-test_data = ([test_hist2d_data, test_esum], [test_labels_particle, test_beamE.reshape((-1, 1))])
-
-best_model = train_until_convergence(train_data, val_data, test_data, input_shape)
-
-# predicted_energy_scaled = best_model.predict(test_data[0])[1]
-# predicted_energy = scaler.inverse_transform(predicted_energy_scaled)
-
-predicted_energy = best_model.predict(test_data[0])[1]
-
-loss, acc_particle, mae_energy = best_model.evaluate(test_data[0], test_data[1])
-print(f'Test Loss: {loss}, Test Particle Accuracy: {acc_particle}, Test Energy MAE: {mae_energy}')
-
-predictions_particle, _ = best_model.predict(test_data[0])
-predictions_particle_classes = np.argmax(predictions_particle, axis=1)
-
-particle_accuracy = np.mean(predictions_particle_classes == np.argmax(test_data[1][0], axis=1))
-print(f'Test Particle Type Accuracy: {particle_accuracy}')
-
-# particle_labels = ['e+', 'e-', 'pi+', 'pi-']
-particle_labels = ['e-', 'pi-']
-true_labels = np.argmax(test_data[1][0], axis=1)
-plt.figure(figsize=(12, 6))
-plt.hist(true_labels, bins=np.arange(len(particle_labels) + 1) - 0.5, alpha=0.5, label='True Particle Types')
-plt.hist(predictions_particle_classes, bins=np.arange(len(particle_labels) + 1) - 0.5, alpha=0.5, label='Predicted Particle Types')
-plt.xlabel('Particle Types')
-plt.ylabel('Frequency')
-plt.xticks(np.arange(len(particle_labels)), particle_labels)
-plt.legend()
-plt.title('True vs Predicted Particle Types')
-plt.savefig('particle_types_histogram.png')
-
-plt.figure(figsize=(12, 6))
-plt.scatter(test_data[1][1], predicted_energy, alpha=0.5, label='Predicted vs True Energy')
-plt.xlabel('True Energy')
-plt.ylabel('Predicted Energy')
-plt.legend()
-plt.title('True vs Predicted Energy')
-plt.savefig('energy_scatter.png')
