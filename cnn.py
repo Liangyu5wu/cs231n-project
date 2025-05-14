@@ -44,34 +44,73 @@ def split_data(beamE, hist2d_data, esum, labels_particle, split_ratio=(0.7, 0.2,
            (val_beamE, val_hist2d_data, val_esum, val_labels_particle), \
            (test_beamE, test_hist2d_data, test_esum, test_labels_particle)
 
+def conv_block(x, filters, kernel_size, use_residual=True):
+    conv = layers.Conv2D(filters, kernel_size, padding='same')(x)
+    conv = layers.BatchNormalization()(conv)
+    conv = layers.Activation('relu')(conv)
+    conv = layers.Conv2D(filters, kernel_size, padding='same')(conv)
+    conv = layers.BatchNormalization()(conv)
+    
+    if use_residual:
+        if x.shape[-1] != filters:
+            x = layers.Conv2D(filters, (1, 1))(x)
+        conv = layers.Add()([conv, x])
+    
+    return layers.Activation('relu')(conv)
+
 def build_model(input_shape):
+    # Image input branch
     input_img = layers.Input(shape=input_shape, name='input_img')
     input_esum = layers.Input(shape=(1,), name='input_esum')
 
-    x = layers.Conv2D(64, (5, 5), activation='relu')(input_img)
-    x = layers.Conv2D(32, (3, 3), activation='relu')(x)
-    x = layers.MaxPooling2D((2, 2))(x)
-    x = layers.Conv2D(32, (3, 3), activation='relu')(x)
-    x = layers.Conv2D(32, (3, 3), activation='relu')(x)
+    # Initial convolution
+    x = layers.Conv2D(64, (7, 7), strides=(2, 2), padding='same')(input_img)
     x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+    x = layers.MaxPooling2D((3, 3), strides=(2, 2), padding='same')(x)
+
+    # Convolutional blocks with increasing complexity
+    x = conv_block(x, 64, (3, 3))
     x = layers.MaxPooling2D((2, 2))(x)
-    x = layers.Conv2D(32, (3, 3), activation='relu')(x)
-    x = layers.Conv2D(32, (3, 3), activation='relu')(x)
-    x = layers.Conv2D(6, (3, 3), activation='relu')(x)
+    
+    x = conv_block(x, 128, (3, 3))
+    x = layers.MaxPooling2D((2, 2))(x)
+    
+    x = conv_block(x, 256, (3, 3))
     x = layers.MaxPooling2D((2, 2))(x)
 
-    x = layers.Flatten()(x)
+    # Global features
+    x1 = layers.GlobalAveragePooling2D()(x)
+    x2 = layers.GlobalMaxPooling2D()(x)
+    x = layers.Concatenate()([x1, x2])
 
-    x = layers.Dense(512, activation='relu')(x)
-    x = layers.Dropout(0.2)(x)  
+    # Dense layers for feature processing
+    x = layers.Dense(512)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+    x = layers.Dropout(0.3)(x)
+
+    x = layers.Dense(256)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+    x = layers.Dropout(0.2)(x)
+
+    # Process energy sum with its own dense layers
+    e = layers.Dense(64, activation='relu')(input_esum)
+    e = layers.BatchNormalization()(e)
+    e = layers.Dense(32, activation='relu')(e)
+    e = layers.BatchNormalization()(e)
+
+    # Combine image features with energy sum
+    x = layers.Concatenate()([x, e])
+
+    # Final classification layers
     x = layers.Dense(128, activation='relu')(x)
-    x = layers.Dropout(0.2)(x) 
-    x = layers.Dense(32, activation='relu')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dropout(0.2)(x)
 
-    x = layers.Concatenate()([x, input_esum])
-
+    # Output layers
     output_particle = layers.Dense(4, activation='softmax', name='output_particle')(x)
-
     output_energy = layers.Dense(1, name='output_energy')(x)
 
     model = models.Model(inputs=[input_img, input_esum], outputs=[output_particle, output_energy])
@@ -93,32 +132,70 @@ def train_until_convergence(train_data, val_data, test_data, input_shape, max_ro
     
     while round_counter < max_rounds:
         model = build_model(input_shape)
-        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),  
-                      loss={'output_particle': 'categorical_crossentropy', 
-                            'output_energy': 'mean_squared_logarithmic_error'},
-                      loss_weights={'output_particle': 0.5, 'output_energy': 2.0},  
-                      metrics={'output_particle': 'accuracy', 'output_energy': 'mae'})
+        
+        model.compile(
+            optimizer=tf.keras.optimizers.AdamW(
+                learning_rate=0.001,  # Fixed initial learning rate
+                weight_decay=0.0001
+            ),
+            loss={
+                'output_particle': 'categorical_crossentropy',
+                'output_energy': 'mean_squared_logarithmic_error'
+            },
+            loss_weights={
+                'output_particle': 1.0,
+                'output_energy': 1.0
+            },
+            metrics={
+                'output_particle': ['accuracy', tf.keras.metrics.AUC()],
+                'output_energy': 'mae'
+            }
+        )
 
-        early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=patience) 
-        checkpoint = tf.keras.callbacks.ModelCheckpoint('best_model.keras', monitor='val_loss', save_best_only=True)
+        # Enhanced callbacks
+        early_stopping = tf.keras.callbacks.EarlyStopping(
+            monitor='val_output_particle_accuracy',
+            patience=patience,
+            restore_best_weights=True,
+            mode='max'
+        )
+        
+        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
+            monitor='val_output_particle_accuracy',
+            factor=0.5,
+            patience=5,
+            min_lr=1e-6,
+            mode='max',
+            verbose=1  # Added verbose to see when learning rate changes
+        )
+        
+        checkpoint = tf.keras.callbacks.ModelCheckpoint(
+            'best_model.keras',
+            monitor='val_output_particle_accuracy',
+            save_best_only=True,
+            mode='max'
+        )
 
-        history = model.fit(train_data[0],
-                            train_data[1],
-                            validation_data=(val_data[0], val_data[1]),
-                            epochs=epochs_per_round,
-                            batch_size=128,
-                            callbacks=[early_stopping, checkpoint])
+        history = model.fit(
+            train_data[0],
+            train_data[1],
+            validation_data=(val_data[0], val_data[1]),
+            epochs=epochs_per_round,
+            batch_size=64,
+            callbacks=[early_stopping, reduce_lr, checkpoint]
+        )
 
         plot_loss(history, save_file=f'loss_vs_epoch_round_{round_counter}.png')
 
         model = tf.keras.models.load_model('best_model.keras')
-        val_loss = model.evaluate(val_data[0], val_data[1])[0]
+        val_metrics = model.evaluate(val_data[0], val_data[1])
+        val_particle_acc = val_metrics[3]  # Assuming accuracy is the 4th metric
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        if val_particle_acc > best_val_loss:
+            best_val_loss = val_particle_acc
             round_counter += 1
         else:
-            print(f"Validation loss did not improve after {round_counter} rounds.")
+            print(f"Validation accuracy did not improve after {round_counter} rounds.")
             break
     
     return model
