@@ -242,33 +242,64 @@ plt.savefig(f'energy_scatter_channels_{channel_str}.png')
 
 def plot_selected_channels(data, channels, num_samples=2):
     particle_labels = ['e-', 'pi-']
-    fig, axes = plt.subplots(num_samples, len(channels), figsize=(5*len(channels), 5*num_samples))
+    
+    fig = plt.figure(figsize=(5*len(channels) + 1, 5*num_samples))
+    
+    grid = plt.GridSpec(num_samples, len(channels) + 1, width_ratios=[1]*len(channels) + [0.1])
+    
+    vmins = []
+    vmaxs = []
+    sample_indices = []
     
     for i in range(num_samples):
-
         particle_idx = i
         sample_mask = (true_labels == particle_idx)
-        sample_indices = np.where(sample_mask)[0]
+        indices = np.where(sample_mask)[0]
         
-        if len(sample_indices) > 0:
-            sample_idx = np.random.choice(sample_indices)
+        if len(indices) > 0:
+
+            sample_idx = np.random.choice(indices)
+            sample_indices.append(sample_idx)
             
-            for j, channel_idx in enumerate(range(len(channels))):
-                if num_samples > 1:
-                    ax = axes[i, j]
-                else:
-                    ax = axes[j]
-                
+            vmin = float('inf')
+            vmax = float('-inf')
+            
+            for channel_idx in range(len(channels)):
                 img = data[sample_idx, :, :, channel_idx]
-                im = ax.imshow(img, cmap='viridis')
-                
-                if j == 0:
-                    ax.set_ylabel(f"{particle_labels[particle_idx]}", fontsize=14)
-                
-                ax.set_title(f"Channel {channels[channel_idx]}")
-                fig.colorbar(im, ax=ax)
+                vmin = min(vmin, np.min(img))
+                vmax = max(vmax, np.max(img))
+            
+            vmin = vmin * 0.95 if vmin > 0 else vmin * 1.05
+            vmax = vmax * 1.05 if vmax > 0 else vmax * 0.95
+            
+            vmins.append(vmin)
+            vmaxs.append(vmax)
+            print(f"Color scale range for {particle_labels[particle_idx]}: [{vmin:.2f}, {vmax:.2f}]")
     
-    plt.tight_layout()
-    plt.savefig(f'selected_channels_visualization_{channel_str}.png')
+    for i in range(len(sample_indices)):
+        particle_idx = i
+        sample_idx = sample_indices[i]
+        vmin = vmins[i]
+        vmax = vmaxs[i]
+        
+        cbar_ax = fig.add_subplot(grid[i, -1])
+        
+        for j in range(len(channels)):
+            ax = fig.add_subplot(grid[i, j])
+            
+            img = data[sample_idx, :, :, j]
+            im = ax.imshow(img, cmap='viridis', vmin=vmin, vmax=vmax)
+            
+            if j == 0:
+                ax.set_ylabel(f"{particle_labels[particle_idx]}", fontsize=14)
+            
+            ax.set_title(f"Channel {channels[j]}")
+        
+        plt.colorbar(im, cax=cbar_ax)
+        cbar_ax.set_ylabel(f"{particle_labels[i]} Intensity")
+    
+    plt.suptitle("Visualization of Selected Time Channels", fontsize=16)
+    plt.subplots_adjust(wspace=0.3, hspace=0.3, top=0.9, right=0.95)
+    plt.savefig(f'selected_channels_visualization_{channel_str}.png', bbox_inches='tight')
 
 plot_selected_channels(test_hist2d_data, selected_channels, num_samples=2)
