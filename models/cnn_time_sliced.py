@@ -5,13 +5,17 @@ import matplotlib.pyplot as plt
 from tensorflow.keras import layers, models
 from sklearn.preprocessing import StandardScaler
 
-def load_data(file_path, group_name):
+def load_data(file_path, group_name, selected_channels=None):
+
     with h5py.File(file_path, 'r') as f:
         group = f[group_name]
         beamE = group['beamE'][:] / 1000
         hist2d_data = group['hist2d_data'][:]
         
-        esum = np.sum(hist2d_data[:,:,:,-1], axis=(1, 2))
+        if selected_channels is not None:
+            hist2d_data = hist2d_data[:, :, :, selected_channels]
+        
+        esum = np.sum(hist2d_data[:, :, :, -1], axis=(1, 2))
 
         n_events, height, width, n_channels = hist2d_data.shape
         
@@ -65,7 +69,7 @@ def build_model(input_shape):
 
     x = layers.Flatten()(x)
     x = layers.Dense(512, activation='relu')(x)
-    x = layers.Dropout(0.3)(x)
+    x = layers.Dropout(0.2)(x)
     x = layers.Dense(128, activation='relu')(x)
     x = layers.Dropout(0.2)(x)
     x = layers.Dense(64, activation='relu')(x)
@@ -90,8 +94,22 @@ def plot_loss(history, save_file='loss_vs_epoch.png'):
     plt.title('Training and Validation Loss')
     plt.savefig(save_file)
 
+
+selected_channels = [0, 3, 6, 9, -1] 
+
+if -1 in selected_channels:
+    total_channels = 12
+    selected_channels = [ch if ch >= 0 else total_channels + ch for ch in selected_channels]
+
+selected_channels = sorted(selected_channels)
+print(f"Selected channels: {selected_channels}")
+
 particle_types = ['e-', 'pi-']
-energy_ranges = ['E1-100']
+
+file_patterns = [
+    {'energy_range': 'E1-100', 'suffix': '2000'},         
+    {'energy_range': 'E1-100', 'suffix': '2000_1'}       
+]
 
 beamE_list = []
 hist2d_data_list = []
@@ -100,19 +118,24 @@ particles_type_list = []
 data_shape = None
 
 for i, particle in enumerate(particle_types):
-    for energy_range in energy_ranges:
-        file_path = f'{particle}_{energy_range}_2000_time_sliced.h5'
+    for pattern in file_patterns:
+        energy_range = pattern['energy_range']
+        suffix = pattern['suffix']
+        
+        file_path = f'{particle}_{energy_range}_{suffix}_time_sliced.h5'
         group_name = f'{particle}_{energy_range}_2000'
         
         try:
-            beamE, hist2d_data, esum, shape = load_data(file_path, group_name)
+            beamE, hist2d_data, esum, shape = load_data(file_path, group_name, selected_channels)
             
             beamE_list.append(beamE)
             hist2d_data_list.append(hist2d_data)
             esum_list.append(esum)
             
             particles_type_list.append(np.full(beamE.shape[0], i))
-            data_shape = shape
+            if data_shape is None:
+                data_shape = shape
+            
             print(f"Successfully loaded {file_path} with shape {hist2d_data.shape}")
         except Exception as e:
             print(f"Error loading {file_path}: {e}")
@@ -121,6 +144,8 @@ beamE = np.concatenate(beamE_list, axis=0)
 hist2d_data = np.concatenate(hist2d_data_list, axis=0)
 esum = np.concatenate(esum_list, axis=0)
 particles_type = np.concatenate(particles_type_list, axis=0)
+
+print(f"Combined data shapes: beamE: {beamE.shape}, hist2d_data: {hist2d_data.shape}, esum: {esum.shape}, particles_type: {particles_type.shape}")
 
 scaler = StandardScaler()
 esum = scaler.fit_transform(esum.reshape(-1, 1)).flatten()
@@ -145,24 +170,26 @@ def train_until_convergence(train_data, val_data, test_data, input_shape, max_ro
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),  
                       loss={'output_particle': 'categorical_crossentropy', 
                             'output_energy': 'mean_squared_logarithmic_error'},
-                      loss_weights={'output_particle': 1.0, 'output_energy': 100.0},  
+                      loss_weights={'output_particle': 1.0, 'output_energy': 10.0},  
                       metrics={'output_particle': 'accuracy', 'output_energy': 'mae'})
 
         model.summary()
 
+        channel_str = '_'.join(map(str, selected_channels))
+        model_filename = f'best_model_time_sliced_channels_{channel_str}.keras'
         early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=patience) 
-        checkpoint = tf.keras.callbacks.ModelCheckpoint('best_model_time_sliced.keras', monitor='val_loss', save_best_only=True)
+        checkpoint = tf.keras.callbacks.ModelCheckpoint(model_filename, monitor='val_loss', save_best_only=True)
 
         history = model.fit(train_data[0],
                             train_data[1],
                             validation_data=(val_data[0], val_data[1]),
                             epochs=epochs_per_round,
-                            batch_size=128,
+                            batch_size=256,
                             callbacks=[early_stopping, checkpoint])
 
-        plot_loss(history, save_file=f'loss_vs_epoch_round_{round_counter}_time_sliced.png')
+        plot_loss(history, save_file=f'loss_vs_epoch_round_{round_counter}_channels_{channel_str}.png')
 
-        model = tf.keras.models.load_model('best_model_time_sliced.keras')
+        model = tf.keras.models.load_model(model_filename)
         val_loss = model.evaluate(val_data[0], val_data[1])[0]
 
         if val_loss < best_val_loss:
@@ -193,6 +220,8 @@ print(f'Test Particle Type Accuracy: {particle_accuracy}')
 particle_labels = ['e-', 'pi-']
 true_labels = np.argmax(test_data[1][0], axis=1)
 
+channel_str = '_'.join(map(str, selected_channels))
+
 plt.figure(figsize=(12, 6))
 plt.hist(true_labels, bins=np.arange(len(particle_labels) + 1) - 0.5, alpha=0.5, label='True Particle Types')
 plt.hist(predictions_particle_classes, bins=np.arange(len(particle_labels) + 1) - 0.5, alpha=0.5, label='Predicted Particle Types')
@@ -200,39 +229,46 @@ plt.xlabel('Particle Types')
 plt.ylabel('Frequency')
 plt.xticks(np.arange(len(particle_labels)), particle_labels)
 plt.legend()
-plt.title('True vs Predicted Particle Types')
-plt.savefig('particle_types_histogram_time_sliced.png')
+plt.title(f'True vs Predicted Particle Types (Channels: {channel_str})')
+plt.savefig(f'particle_types_histogram_channels_{channel_str}.png')
 
 plt.figure(figsize=(12, 6))
 plt.scatter(test_data[1][1], predicted_energy, alpha=0.5, label='Predicted vs True Energy')
 plt.xlabel('True Energy (GeV)')
 plt.ylabel('Predicted Energy (GeV)')
 plt.legend()
-plt.title('True vs Predicted Energy')
-plt.savefig('energy_scatter_time_sliced.png')
+plt.title(f'True vs Predicted Energy (Channels: {channel_str})')
+plt.savefig(f'energy_scatter_channels_{channel_str}.png')
 
-
-def plot_time_slices(data, particle_types, num_samples=2):
-    n_channels = data.shape[3]
-    fig, axes = plt.subplots(num_samples, n_channels, figsize=(20, 5*num_samples))
+def plot_selected_channels(data, channels, num_samples=2):
+    particle_labels = ['e-', 'pi-']
+    fig, axes = plt.subplots(num_samples, len(channels), figsize=(5*len(channels), 5*num_samples))
     
     for i in range(num_samples):
-        particle_idx = i % len(particle_types)
-        sample_mask = (np.argmax(test_data[1][0], axis=1) == particle_idx)
+
+        particle_idx = i
+        sample_mask = (true_labels == particle_idx)
         sample_indices = np.where(sample_mask)[0]
+        
         if len(sample_indices) > 0:
             sample_idx = np.random.choice(sample_indices)
             
-            for j in range(n_channels):
-                ax = axes[i, j]
-                img = data[sample_idx, :, :, j]
+            for j, channel_idx in enumerate(range(len(channels))):
+                if num_samples > 1:
+                    ax = axes[i, j]
+                else:
+                    ax = axes[j]
+                
+                img = data[sample_idx, :, :, channel_idx]
                 im = ax.imshow(img, cmap='viridis')
+                
                 if j == 0:
-                    ax.set_ylabel(f"{particle_types[particle_idx]}", fontsize=14)
-                ax.set_title(f"Time Slice {j+1}")
+                    ax.set_ylabel(f"{particle_labels[particle_idx]}", fontsize=14)
+                
+                ax.set_title(f"Channel {channels[channel_idx]}")
                 fig.colorbar(im, ax=ax)
     
     plt.tight_layout()
-    plt.savefig('particle_time_slice_visualization.png')
+    plt.savefig(f'selected_channels_visualization_{channel_str}.png')
 
-plot_time_slices(test_hist2d_data, particle_labels, num_samples=2)
+plot_selected_channels(test_hist2d_data, selected_channels, num_samples=2)
