@@ -6,6 +6,7 @@ SRC_DIR="/sdf/data/atlas/u/liangyu/dSiPM/DREAMSim/sim/src"
 OUTER_DIR="/sdf/data/atlas/u/liangyu/dSiPM/DREAMSim/test"
 BUILD_DIR="/sdf/data/atlas/u/liangyu/dSiPM/DREAMSim/sim"
 STEPPING_FILE="B4bSteppingAction.cc"
+PARAMBATCH_FILE="paramBatch03_single.mac"
 LUSTRE_DIR="/fs/ddn/sdf/group/atlas/d/liangyu/dSiPM/cs231n"
 
 echo "Starting scanning..."
@@ -13,16 +14,30 @@ echo "Starting scanning..."
 TOTAL_EVENTS=2000
 EVENTS_PER_JOB=10
 NUM_JOBS=200
-GUN_ENERGY_MIN=30
-GUN_ENERGY_MAX=30
-PARTICLE_NAME="e-"
+GUN_ENERGY_MIN=1
+GUN_ENERGY_MAX=100
+PARTICLE_NAME="pi+"
+
+INCIDENT_ANGLE=0
+ANGLE_RAD=$(echo "$INCIDENT_ANGLE * 3.14159265359 / 180" | bc -l)
+MOMENTUM_X=$(echo "s($ANGLE_RAD)" | bc -l)
+MOMENTUM_Y="0.0"
+MOMENTUM_Z=$(echo "c($ANGLE_RAD)" | bc -l)
 
 
     
 cd $SRC_DIR
 # sed -i "822s/.*/  if (!(isCoreS || isCoreC || isCladS || isCladC) || rodNumber < 35 || rodNumber > 55 || layerNumber < 32 || layerNumber > 50)/" $STEPPING_FILE
-sed -i "822s/.*/  if (!(isCoreS || isCoreC || isCladS || isCladC) || rodNumber < 20 || rodNumber > 60 || layerNumber < 15 || layerNumber > 65)/" $STEPPING_FILE
+# sed -i "822s/.*/  if (!(isCoreS || isCoreC || isCladS || isCladC) || rodNumber < 20 || rodNumber > 60 || layerNumber < 15 || layerNumber > 65)/" $STEPPING_FILE
+sed -i "822s/.*/  if (!(isCoreS || isCoreC || isCladS || isCladC) )/" $STEPPING_FILE
 echo "$STEPPING_FILE 822 line gets modified!"
+
+cd $BUILD_DIR
+sed -i "23s/.*/\\#\\$\\$\\$ pMomentum_x      $MOMENTUM_X/" $PARAMBATCH_FILE
+sed -i "24s/.*/\\#\\$\\$\\$ pMomentum_y      $MOMENTUM_Y/" $PARAMBATCH_FILE
+sed -i "25s/.*/\\#\\$\\$\\$ pMomentum_z      $MOMENTUM_Z/" $PARAMBATCH_FILE
+echo "Modified momentum direction in $PARAMBATCH_FILE to angle $INCIDENT_ANGLE degrees"
+echo "Setting particle momentum direction: ($MOMENTUM_X, $MOMENTUM_Y, $MOMENTUM_Z)"
 
 TEMP_SCRIPT=$(mktemp)
 cat > $TEMP_SCRIPT << EOF
@@ -42,7 +57,7 @@ rm $TEMP_SCRIPT
 echo "========================================="
 
 cd $OUTER_DIR
-WORK_DIR="${PARTICLE_NAME}_E${GUN_ENERGY_MIN}GeV_${TOTAL_EVENTS}jobs"
+WORK_DIR="${PARTICLE_NAME}_E${GUN_ENERGY_MIN}GeV_${TOTAL_EVENTS}_angle${INCIDENT_ANGLE}_jobs"
 mkdir -p $WORK_DIR
 cd $WORK_DIR
 
@@ -65,12 +80,12 @@ EOF
 #
 #SBATCH --account=atlas:default
 #SBATCH --partition=roma
-#SBATCH --job-name=RE${GUN_ENERGY_MIN}_${job_id}
+#SBATCH --job-name=RE${GUN_ENERGY_MIN}_${INCIDENT_ANGLE}_${job_id}
 #SBATCH --output=output_E${GUN_ENERGY_MIN}_job${job_id}-%j.txt
 #SBATCH --error=error_E${GUN_ENERGY_MIN}_job${job_id}-%j.txt
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=4g
+#SBATCH --mem-per-cpu=10g
 #SBATCH --time=4:00:00
 
 unset KRB5CCNAME
@@ -99,7 +114,7 @@ echo "========================================="
 echo "Waiting for all jobs to complete..."
     
 while true; do
-  JOB_PREFIX="RE${GUN_ENERGY_MIN}"
+  JOB_PREFIX="RE${GUN_ENERGY_MIN}_${INCIDENT_ANGLE}"
   RUNNING_JOBS=$(squeue -u $USER -h -o "%.15j" | grep "${JOB_PREFIX}_" | wc -l)
       
   if [ $RUNNING_JOBS -eq 0 ]; then
@@ -112,7 +127,7 @@ while true; do
 done
 
 
-LUSTRE_SUBDIR="${LUSTRE_DIR}/${PARTICLE_NAME}_E${GUN_ENERGY_MIN}-${GUN_ENERGY_MAX}_${TOTAL_EVENTS}"
+LUSTRE_SUBDIR="${LUSTRE_DIR}/${PARTICLE_NAME}_E${GUN_ENERGY_MIN}-${GUN_ENERGY_MAX}_${TOTAL_EVENTS}_${INCIDENT_ANGLE}"
 mkdir -p ${LUSTRE_SUBDIR}
 echo "Moving ROOT files to Lustre filesystem at ${LUSTRE_SUBDIR}..."
 
