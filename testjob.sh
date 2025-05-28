@@ -11,9 +11,9 @@ LUSTRE_DIR="/fs/ddn/sdf/group/atlas/d/liangyu/dSiPM/cs231n"
 
 echo "Starting scanning..."
 
-TOTAL_EVENTS=2000
+TOTAL_EVENTS=4000
 EVENTS_PER_JOB=10
-NUM_JOBS=200
+NUM_JOBS=400
 GUN_ENERGY_MIN=1
 GUN_ENERGY_MAX=100
 PARTICLE_NAME="pi+"
@@ -105,6 +105,23 @@ EOF
   if (( job_id % 50 == 0 )); then
     echo "Pausing for 3 seconds to prevent overwhelming the scheduler..."
     sleep 3
+  fi
+
+  if (( job_id == 250 )); then
+    echo "Job ID has reached 250. Pausing and waiting for submitted jobs to complete before continuing..."
+  
+    while true; do
+      JOB_PREFIX="RE${GUN_ENERGY_MIN}_${INCIDENT_ANGLE}"
+      RUNNING_JOBS=$(squeue -u $USER -h -o "%.15j" | grep "${JOB_PREFIX}_" | wc -l)
+        
+      if [ $RUNNING_JOBS -eq 0 ]; then
+        echo "All previously submitted jobs with prefix $JOB_PREFIX have completed. Continuing with the remaining submissions..."
+        break
+      else
+        echo "$(date): Still waiting for $RUNNING_JOBS jobs with prefix $JOB_PREFIX to complete..."
+        sleep 10
+      fi
+    done
   fi
 done
     
