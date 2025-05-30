@@ -45,7 +45,7 @@ def save_root_to_h5(particle_type, energy_min, energy_max, event_read=2000, even
             dataset[-new_data.shape[0]:] = new_data
 
         for i in range(1, event_read // 10 + 1):
-            file_name = f"{particle_type}_E{energy_range}_{event_count}/mc_{particle_type}_job_run1_{i}_Test_10evt_{particle_type}_{energy_min}_{energy_max}.root"
+            file_name = f"{particle_type}_E{energy_range}_{event_count}_0/mc_{particle_type}_job_run1_{i}_Test_10evt_{particle_type}_{energy_min}_{energy_max}.root"
             if not os.path.exists(file_name):
                 print(f"File {file_name} doesn't exist, skipping.")
                 continue
@@ -108,10 +108,10 @@ def save_root_to_h5(particle_type, energy_min, energy_max, event_read=2000, even
             print(f"Data from {file_name} have been saved.")
 
     print(f"All data have been saved to {output_file}.")
-particle_type = "pi-"
+particle_type = "e+"
 energy_min = 1
 energy_max = 100
-event_read = 11
-event_count = 2000
+event_read = 4000
+event_count = 4000
 
 save_root_to_h5(particle_type, energy_min, energy_max, event_read, event_count)
