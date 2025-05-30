@@ -3,11 +3,11 @@ import h5py
 import numpy as np
 import os
 
-def save_root_to_h5(particle_type, energy_min, energy_max, event_read=2000, event_count=2000):
+def save_root_to_h5(particle_type, energy_min, energy_max, event_read=2000, event_count=2000, timestep=0.1):
 
 
     energy_range = f"{energy_min}-{energy_max}"
-    output_file = f"{particle_type}_E{energy_range}_{event_count}_time_sliced.h5"
+    output_file = f"{particle_type}_E{energy_range}_{event_count}_time_sliced{timestep}.h5"
     
     print(f"Processing {particle_type} with energy {energy_range} GeV")
     print(f"Output file: {output_file}")
@@ -15,7 +15,7 @@ def save_root_to_h5(particle_type, energy_min, energy_max, event_read=2000, even
     x_bins = np.arange(-25, 15, 0.25)
     y_bins = np.arange(-14, 21, 0.25)
     
-    time_cuts = [7, 7.25, 7.5, 7.75, 8, 8.5, 9, 9.5, 10, 11, 15]
+    time_cuts = np.arange(7, 20.1, timestep).tolist()
 
     time_cuts_all = time_cuts + [float("inf")]
     num_time_slices = len(time_cuts_all)
@@ -113,5 +113,6 @@ energy_min = 1
 energy_max = 100
 event_read = 4000
 event_count = 4000
+timestep = 0.1
 
-save_root_to_h5(particle_type, energy_min, energy_max, event_read, event_count)
+save_root_to_h5(particle_type, energy_min, energy_max, event_read, event_count, timestep)
