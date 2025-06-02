@@ -72,8 +72,6 @@ def build_model(input_shape):
     x = layers.Dropout(0.2)(x)
     x = layers.Dense(128, activation='relu')(x)
     x = layers.Dropout(0.2)(x)
-    x = layers.Dense(64, activation='relu')(x)
-    x = layers.Dropout(0.2)(x)
     
     x = layers.Concatenate()([x, input_esum])
     x = layers.Dense(32, activation='relu')(x)
@@ -95,7 +93,8 @@ def plot_loss(history, save_file='loss_vs_epoch.png'):
     plt.savefig(save_file)
 
 
-selected_channels = [0, 3, 6, 9, -1] 
+# selected_channels = [3, 8, -1]
+selected_channels = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, -1] 
 
 if -1 in selected_channels:
     total_channels = 12
@@ -122,7 +121,7 @@ for i, particle in enumerate(particle_types):
         energy_range = pattern['energy_range']
         suffix = pattern['suffix']
         
-        file_path = f'{particle}_{energy_range}_{suffix}_time_sliced.h5'
+        file_path = f'dataset/{particle}_{energy_range}_{suffix}_time_sliced.h5'
         group_name = f'{particle}_{energy_range}_2000'
         
         try:
@@ -161,7 +160,7 @@ print(f"Data shape: {height} x {width} x {n_channels}")
 
 input_shape = (height, width, n_channels)
 
-def train_until_convergence(train_data, val_data, test_data, input_shape, max_rounds=1, epochs_per_round=20, patience=10):
+def train_until_convergence(train_data, val_data, test_data, input_shape, max_rounds=1, epochs_per_round=30, patience=10):
     best_val_loss = np.inf
     round_counter = 0
     
@@ -239,67 +238,3 @@ plt.ylabel('Predicted Energy (GeV)')
 plt.legend()
 plt.title(f'True vs Predicted Energy (Channels: {channel_str})')
 plt.savefig(f'energy_scatter_channels_{channel_str}.png')
-
-def plot_selected_channels(data, channels, num_samples=2):
-    particle_labels = ['e-', 'pi-']
-    
-    fig = plt.figure(figsize=(5*len(channels) + 1, 5*num_samples))
-    
-    grid = plt.GridSpec(num_samples, len(channels) + 1, width_ratios=[1]*len(channels) + [0.1])
-    
-    vmins = []
-    vmaxs = []
-    sample_indices = []
-    
-    for i in range(num_samples):
-        particle_idx = i
-        sample_mask = (true_labels == particle_idx)
-        indices = np.where(sample_mask)[0]
-        
-        if len(indices) > 0:
-
-            sample_idx = np.random.choice(indices)
-            sample_indices.append(sample_idx)
-            
-            vmin = float('inf')
-            vmax = float('-inf')
-            
-            for channel_idx in range(len(channels)):
-                img = data[sample_idx, :, :, channel_idx]
-                vmin = min(vmin, np.min(img))
-                vmax = max(vmax, np.max(img))
-            
-            vmin = vmin * 0.95 if vmin > 0 else vmin * 1.05
-            vmax = vmax * 1.05 if vmax > 0 else vmax * 0.95
-            
-            vmins.append(vmin)
-            vmaxs.append(vmax)
-            print(f"Color scale range for {particle_labels[particle_idx]}: [{vmin:.2f}, {vmax:.2f}]")
-    
-    for i in range(len(sample_indices)):
-        particle_idx = i
-        sample_idx = sample_indices[i]
-        vmin = vmins[i]
-        vmax = vmaxs[i]
-        
-        cbar_ax = fig.add_subplot(grid[i, -1])
-        
-        for j in range(len(channels)):
-            ax = fig.add_subplot(grid[i, j])
-            
-            img = data[sample_idx, :, :, j]
-            im = ax.imshow(img, cmap='viridis', vmin=vmin, vmax=vmax)
-            
-            if j == 0:
-                ax.set_ylabel(f"{particle_labels[particle_idx]}", fontsize=14)
-            
-            ax.set_title(f"Channel {channels[j]}")
-        
-        plt.colorbar(im, cax=cbar_ax)
-        cbar_ax.set_ylabel(f"{particle_labels[i]} Intensity")
-    
-    plt.suptitle("Visualization of Selected Time Channels", fontsize=16)
-    plt.subplots_adjust(wspace=0.3, hspace=0.3, top=0.9, right=0.95)
-    plt.savefig(f'selected_channels_visualization_{channel_str}.png', bbox_inches='tight')
-
-plot_selected_channels(test_hist2d_data, selected_channels, num_samples=2)
